@@ -5,6 +5,7 @@ require("dotenv").config();
 
 const db = require("./config/db");
 const auctionRoutes = require("./routes/auctionRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 const app = express();
 
@@ -36,14 +37,23 @@ app.get("/api/products", async (req, res) => {
   try {
     const [products] = await db.query(`
       SELECT
-        id,
-        name,
-        category,
-        starting_bid,
-        location,
-        seller_id
-      FROM products
-      ORDER BY id ASC
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.quantity,
+        p.unit,
+        p.starting_bid,
+        p.harvest_date,
+        p.location,
+        p.image_url,
+        p.status,
+        p.seller_id,
+        u.name AS seller_name
+      FROM products p
+      JOIN users u
+        ON p.seller_id = u.id
+      ORDER BY p.id ASC
     `);
 
     res.json({
@@ -51,7 +61,7 @@ app.get("/api/products", async (req, res) => {
       products,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get products error:", error);
 
     res.status(500).json({
       success: false,
@@ -60,6 +70,61 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
+app.get("/api/products/:id", async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+
+    if (!Number.isInteger(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID.",
+      });
+    }
+
+    const [products] = await db.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.quantity,
+        p.unit,
+        p.starting_bid,
+        p.harvest_date,
+        p.location,
+        p.image_url,
+        p.status,
+        p.seller_id,
+        u.name AS seller_name
+      FROM products p
+      JOIN users u
+        ON p.seller_id = u.id
+      WHERE p.id = ?
+      `,
+      [productId]
+    );
+
+    if (products.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found.",
+      });
+    }
+
+    res.json({
+      success: true,
+      product: products[0],
+    });
+  } catch (error) {
+    console.error("Get single product error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load product.",
+    });
+  }
+});
 // ============================================
 // DATABASE TEST
 // ============================================
@@ -88,6 +153,7 @@ app.get("/api/db-test", async (req, res) => {
 // ============================================
 
 app.use("/api/auctions", auctionRoutes);
+app.use("/api/auth", authRoutes);
 
 // ============================================
 // AUTOMATIC AUCTION END PROCESS

@@ -1,4 +1,3 @@
-
 const express = require("express");
 
 const router = express.Router();
@@ -59,6 +58,170 @@ router.get("/", async (req, res) => {
 });
 
 // ============================================================
+// GET COMPLETED / ENDED AUCTIONS
+// ============================================================
+
+router.get("/history/completed", async (req, res) => {
+  try {
+    const [auctions] = await db.query(`
+      SELECT
+        a.id AS auction_id,
+        a.product_id,
+        a.start_time,
+        a.end_time,
+        a.current_highest_bid,
+        a.current_highest_bidder_id,
+        a.winner_id,
+        a.status,
+
+        p.name,
+        p.category,
+        p.location,
+
+        seller.name AS seller_name,
+
+        winner.name AS winner_name
+
+      FROM auctions a
+
+      JOIN products p
+        ON a.product_id = p.id
+
+      JOIN users seller
+        ON p.seller_id = seller.id
+
+      LEFT JOIN users winner
+        ON a.winner_id = winner.id
+
+      WHERE a.status = 'ended'
+
+      ORDER BY a.end_time DESC
+    `);
+
+    res.json({
+      success: true,
+      auctions,
+    });
+  } catch (error) {
+    console.error(
+      "Get completed auctions error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load completed auctions.",
+    });
+  }
+});
+
+// ============================================================
+// GET ACTIVE AUCTION BY PRODUCT ID
+// ============================================================
+//
+// Example:
+// GET /api/auctions/product/1
+//
+// এটি Product Details page-এর জন্য ব্যবহার হবে।
+//
+// ============================================================
+
+router.get("/product/:productId", async (req, res) => {
+  try {
+    const productId = Number(req.params.productId);
+
+    // --------------------------------------------
+    // Validate product ID
+    // --------------------------------------------
+
+    if (!Number.isInteger(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID.",
+      });
+    }
+
+    // --------------------------------------------
+    // Find latest active auction for this product
+    // --------------------------------------------
+
+    const [auctions] = await db.query(
+      `
+      SELECT
+        a.id AS auction_id,
+        a.product_id,
+        a.start_time,
+        a.end_time,
+        a.current_highest_bid,
+        a.current_highest_bidder_id,
+        a.status,
+
+        p.name,
+        p.category,
+        p.starting_bid,
+        p.location,
+        p.description,
+
+        seller.name AS seller_name,
+
+        bidder.name AS highest_bidder_name
+
+      FROM auctions a
+
+      JOIN products p
+        ON a.product_id = p.id
+
+      JOIN users seller
+        ON p.seller_id = seller.id
+
+      LEFT JOIN users bidder
+        ON a.current_highest_bidder_id = bidder.id
+
+      WHERE
+        a.product_id = ?
+        AND a.status = 'active'
+        AND a.end_time > NOW()
+
+      ORDER BY a.id DESC
+
+      LIMIT 1
+      `,
+      [productId]
+    );
+
+    // --------------------------------------------
+    // No active auction
+    // --------------------------------------------
+
+    if (auctions.length === 0) {
+      return res.json({
+        success: true,
+        auction: null,
+      });
+    }
+
+    // --------------------------------------------
+    // Return active auction
+    // --------------------------------------------
+
+    res.json({
+      success: true,
+      auction: auctions[0],
+    });
+  } catch (error) {
+    console.error(
+      "Get active auction by product error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load active auction.",
+    });
+  }
+});
+
+// ============================================================
 // GET SINGLE AUCTION
 // ============================================================
 
@@ -91,15 +254,20 @@ router.get("/:auctionId", async (req, res) => {
         p.location,
         p.description,
 
-        u.name AS seller_name
+        seller.name AS seller_name,
+
+        winner.name AS winner_name
 
       FROM auctions a
 
       JOIN products p
         ON a.product_id = p.id
 
-      JOIN users u
-        ON p.seller_id = u.id
+      JOIN users seller
+        ON p.seller_id = seller.id
+
+      LEFT JOIN users winner
+        ON a.winner_id = winner.id
 
       WHERE a.id = ?
       `,
@@ -118,7 +286,10 @@ router.get("/:auctionId", async (req, res) => {
       auction: auctions[0],
     });
   } catch (error) {
-    console.error("Get single auction error:", error);
+    console.error(
+      "Get single auction error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -168,7 +339,10 @@ router.get("/:auctionId/bids", async (req, res) => {
       bids,
     });
   } catch (error) {
-    console.error("Get bid history error:", error);
+    console.error(
+      "Get bid history error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -295,7 +469,8 @@ router.post("/:auctionId/bid", async (req, res) => {
 
       return res.status(403).json({
         success: false,
-        message: "Seller cannot bid on their own product.",
+        message:
+          "Seller cannot bid on their own product.",
       });
     }
 
@@ -305,8 +480,13 @@ router.post("/:auctionId/bid", async (req, res) => {
 
     const [users] = await connection.query(
       `
-      SELECT id, name, role
+      SELECT
+        id,
+        name,
+        role
+
       FROM users
+
       WHERE id = ?
       `,
       [bidderId]
@@ -334,7 +514,8 @@ router.post("/:auctionId/bid", async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: `Your bid must be higher than ৳${currentHighestBid}.`,
+        message:
+          `Your bid must be higher than ৳${currentHighestBid}.`,
       });
     }
 
@@ -350,6 +531,7 @@ router.post("/:auctionId/bid", async (req, res) => {
         bidder_id,
         amount
       )
+
       VALUES (?, ?, ?)
       `,
       [
@@ -366,6 +548,7 @@ router.post("/:auctionId/bid", async (req, res) => {
     await connection.query(
       `
       UPDATE auctions
+
       SET
         current_highest_bid = ?,
         current_highest_bidder_id = ?
@@ -388,6 +571,7 @@ router.post("/:auctionId/bid", async (req, res) => {
     res.json({
       success: true,
       message: "Bid placed successfully.",
+
       bid: {
         auctionId,
         bidderId,
@@ -397,7 +581,10 @@ router.post("/:auctionId/bid", async (req, res) => {
   } catch (error) {
     await connection.rollback();
 
-    console.error("Place bid error:", error);
+    console.error(
+      "Place bid error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -409,7 +596,18 @@ router.post("/:auctionId/bid", async (req, res) => {
 });
 
 // ============================================================
-// CREATE / RESTART AUCTION
+// CREATE NEW AUCTION
+// ============================================================
+//
+// IMPORTANT:
+// এখানে আর পুরোনো auction UPDATE করা হবে না।
+//
+// প্রতিবার নতুন auction তৈরি হলে:
+// - নতুন auction_id হবে
+// - পুরোনো auction history থাকবে
+// - পুরোনো bids থাকবে
+// - নতুন auction-এর নতুন bid history হবে
+//
 // ============================================================
 
 router.post("/", async (req, res) => {
@@ -417,6 +615,7 @@ router.post("/", async (req, res) => {
 
   try {
     const productId = Number(req.body.productId);
+
     const durationMinutes = Number(
       req.body.durationMinutes
     );
@@ -432,11 +631,11 @@ router.post("/", async (req, res) => {
       });
     }
 
-    if (![3, 10, 60].includes(durationMinutes)) {
+    if (![2, 10, 30, 60].includes(durationMinutes)) {
       return res.status(400).json({
         success: false,
         message:
-          "Duration must be 3,10, or 60 minutes.",
+          "Duration must be 2, 10, 30, or 60 minutes.",
       });
     }
 
@@ -480,10 +679,10 @@ router.post("/", async (req, res) => {
     const product = products[0];
 
     // --------------------------------------------
-    // Check existing auction
+    // Check currently active auction
     // --------------------------------------------
 
-    const [existingAuctions] = await connection.query(
+    const [activeAuctions] = await connection.query(
       `
       SELECT
         id,
@@ -492,7 +691,11 @@ router.post("/", async (req, res) => {
 
       FROM auctions
 
-      WHERE product_id = ?
+      WHERE
+        product_id = ?
+        AND status = 'active'
+
+      ORDER BY id DESC
 
       LIMIT 1
 
@@ -501,20 +704,16 @@ router.post("/", async (req, res) => {
       [productId]
     );
 
-    // ========================================================
-    // EXISTING AUCTION
-    // ========================================================
+    // --------------------------------------------
+    // Active auction still running
+    // --------------------------------------------
 
-    if (existingAuctions.length > 0) {
-      const existingAuction = existingAuctions[0];
-
-      // --------------------------------------------
-      // If auction is still active, don't restart
-      // --------------------------------------------
+    if (activeAuctions.length > 0) {
+      const activeAuction = activeAuctions[0];
 
       if (
-        existingAuction.status === "active" &&
-        new Date(existingAuction.end_time) > new Date()
+        new Date(activeAuction.end_time) >
+        new Date()
       ) {
         await connection.rollback();
 
@@ -525,64 +724,30 @@ router.post("/", async (req, res) => {
         });
       }
 
-      // --------------------------------------------
-      // IMPORTANT:
-      // Delete old bid history
-      // --------------------------------------------
-
-      await connection.query(
-        `
-        DELETE FROM bids
-        WHERE auction_id = ?
-        `,
-        [existingAuction.id]
-      );
-
-      // --------------------------------------------
-      // Restart auction
-      // --------------------------------------------
+      // ------------------------------------------
+      // Auction expired but status is still active
+      // ------------------------------------------
+      //
+      // Automatic processor হয়তো এখনো process করেনি।
+      // তাই নতুন auction তৈরির আগে পুরোনোটাকে ended করছি.
+      //
 
       await connection.query(
         `
         UPDATE auctions
 
         SET
-          start_time = NOW(),
-
-          end_time = DATE_ADD(
-            NOW(),
-            INTERVAL ? MINUTE
-          ),
-
-          current_highest_bid = ?,
-
-          current_highest_bidder_id = NULL,
-
-          winner_id = NULL,
-
-          status = 'active'
+          status = 'ended',
+          winner_id = current_highest_bidder_id
 
         WHERE id = ?
         `,
-        [
-          durationMinutes,
-          product.starting_bid,
-          existingAuction.id,
-        ]
+        [activeAuction.id]
       );
-
-      await connection.commit();
-
-      return res.json({
-        success: true,
-        message:
-          "Auction restarted successfully. Old bid history cleared.",
-        auctionId: existingAuction.id,
-      });
     }
 
     // ========================================================
-    // CREATE NEW AUCTION
+    // CREATE COMPLETELY NEW AUCTION
     // ========================================================
 
     const [result] = await connection.query(
@@ -619,17 +784,28 @@ router.post("/", async (req, res) => {
       ]
     );
 
+    const newAuctionId = result.insertId;
+
+    // --------------------------------------------
+    // Commit
+    // --------------------------------------------
+
     await connection.commit();
 
     res.json({
       success: true,
-      message: "Auction created successfully.",
-      auctionId: result.insertId,
+      message:
+        "New auction created successfully.",
+
+      auctionId: newAuctionId,
     });
   } catch (error) {
     await connection.rollback();
 
-    console.error("Create auction error:", error);
+    console.error(
+      "Create auction error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -644,7 +820,7 @@ router.post("/", async (req, res) => {
 // MANUAL PROCESS ENDED AUCTIONS
 // ============================================================
 //
-// এটা backup/manual endpoint হিসেবে রাখা হলো.
+// Backup/manual endpoint.
 // মূল automatic system server.js থেকে প্রতি 3 sec-এ
 // expired auction process করবে.
 //
@@ -667,7 +843,9 @@ router.post("/process-ended", async (req, res) => {
       success: true,
       message:
         "Ended auctions processed successfully.",
-      affectedAuctions: result.affectedRows,
+
+      affectedAuctions:
+        result.affectedRows,
     });
   } catch (error) {
     console.error(
@@ -686,66 +864,5 @@ router.post("/process-ended", async (req, res) => {
 // ============================================================
 // EXPORT ROUTER
 // ============================================================
-
-
-// ============================================================
-// GET COMPLETED / ENDED AUCTIONS
-// ============================================================
-
-router.get("/history/completed", async (req, res) => {
-  try {
-    const [auctions] = await db.query(`
-      SELECT
-        a.id AS auction_id,
-        a.product_id,
-        a.start_time,
-        a.end_time,
-        a.current_highest_bid,
-        a.current_highest_bidder_id,
-        a.winner_id,
-        a.status,
-
-        p.name,
-        p.category,
-        p.location,
-
-        seller.name AS seller_name,
-
-        winner.name AS winner_name
-
-      FROM auctions a
-
-      JOIN products p
-        ON a.product_id = p.id
-
-      JOIN users seller
-        ON p.seller_id = seller.id
-
-      LEFT JOIN users winner
-        ON a.winner_id = winner.id
-
-      WHERE a.status = 'ended'
-
-      ORDER BY a.end_time DESC
-    `);
-
-    res.json({
-      success: true,
-      auctions,
-    });
-  } catch (error) {
-    console.error(
-      "Get completed auctions error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to load completed auctions.",
-    });
-  }
-});
-
 
 module.exports = router;

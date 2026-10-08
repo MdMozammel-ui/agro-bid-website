@@ -1,13 +1,21 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+
+const API_URL = "http://localhost:5000/api";
 
 function Login() {
+  const navigate = useNavigate();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
 
-  const handleSubmit = (e) => {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+
+    setError("");
 
     if (!email || !password) {
       setError("Please fill in all fields.");
@@ -24,9 +32,55 @@ function Login() {
       return;
     }
 
-    setError("");
+    try {
+      setLoading(true);
 
-    alert("Login validation successful!");
+      const response = await fetch(
+        `${API_URL}/auth/login`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            password,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Login failed."
+        );
+      }
+
+      // Save JWT token
+      localStorage.setItem(
+        "agrobid_token",
+        data.token
+      );
+
+      // Save logged-in user information
+      localStorage.setItem(
+        "agrobid_user",
+        JSON.stringify(data.user)
+      );
+
+      // Go to home page
+      navigate("/");
+    } catch (err) {
+      console.error("Login error:", err);
+
+      setError(
+        err.message ||
+          "Something went wrong. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -52,7 +106,10 @@ function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+        <form
+          onSubmit={handleSubmit}
+          className="mt-6 space-y-5"
+        >
 
           <div>
             <label className="mb-2 block text-sm font-semibold">
@@ -62,9 +119,12 @@ function Login() {
             <input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
               placeholder="you@example.com"
-              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-green-600"
+              disabled={loading}
+              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-green-600 disabled:bg-gray-100"
             />
           </div>
 
@@ -76,23 +136,30 @@ function Login() {
             <input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) =>
+                setPassword(e.target.value)
+              }
               placeholder="Enter your password"
-              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-green-600"
+              disabled={loading}
+              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-green-600 disabled:bg-gray-100"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white hover:bg-green-700"
+            disabled={loading}
+            className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Login
+            {loading
+              ? "Logging in..."
+              : "Login"}
           </button>
 
         </form>
 
         <p className="mt-6 text-center text-sm text-gray-500">
           Don't have an account?{" "}
+
           <Link
             to="/register"
             className="font-semibold text-green-700"
